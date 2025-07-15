@@ -92,6 +92,6 @@ app.get('/messages/:chatId', async (req, res) => {
     })));
 });
 
-app.listen(PORT, () => {
+app.listen(PORT,'0.0.0.0', () => {
     console.log(`Bot escuchando en http://localhost:${PORT}`);
 });

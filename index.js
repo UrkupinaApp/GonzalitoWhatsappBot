@@ -39,6 +39,7 @@ client.initialize();
 
 // Ruta para obtener el QR en base64 para mostrarlo en frontend fácilmente
 app.get('/qr', async (req, res) => {
+    console.log("llega la peticion!")
     if (qrCodeString && !authenticated) {
         const qrImage = await qrcode.toDataURL(qrCodeString);
         res.json({ qr: qrImage, raw: qrCodeString,msg:"Mensaje desde el back" });

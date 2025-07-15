@@ -1,97 +1,55 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const app = express();
-const PORT = process.env.PORT || 4000;
+const port = 4000;
 
-// Estado global del QR y autenticación
-let qrData = null;
-let isReady = false;
+let qrCodeString = null;
+let authenticated = false;
 
-// Configuración del bot con flags para servidores
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu'
-        ]
-    }
-});
+const client = new Client();
 
 client.on('qr', (qr) => {
-    // Generamos una imagen del QR en base64 (útil para el frontend)
-    qrcode.toDataURL(qr, (err, url) => {
-        qrData = url;
-        isReady = false;
-        console.log('Nuevo QR generado, escanealo desde el frontend');
-    });
+    qrCodeString = qr;
+    authenticated = false;
+    console.log('Nuevo QR recibido');
 });
 
 client.on('ready', () => {
-    isReady = true;
-    qrData = null; // Ya no es necesario mostrar el QR
-    console.log('Bot autenticado y listo!');
+    authenticated = true;
+    console.log('Bot autenticado y listo');
 });
 
-// Manejo de autenticación expirada/cierre de sesión
+client.on('authenticated', () => {
+    authenticated = true;
+    console.log('Autenticado correctamente');
+});
+
 client.on('disconnected', () => {
-    isReady = false;
-    qrData = null;
-    console.log('Bot desconectado, hay que escanear el QR de nuevo.');
+    authenticated = false;
+    qrCodeString = null;
+    console.log('Desconectado');
 });
 
 client.initialize();
 
-// Ruta para obtener el QR (GET /qr)
-app.get('/qr', (req, res) => {
-    if (qrData) {
-        res.json({ qr: qrData });
-    } else if (isReady) {
-        res.status(200).json({ message: 'Bot autenticado' });
+// Ruta para obtener el QR en base64 para mostrarlo en frontend fácilmente
+app.get('/qr', async (req, res) => {
+    if (qrCodeString && !authenticated) {
+        const qrImage = await qrcode.toDataURL(qrCodeString);
+        res.json({ qr: qrImage, raw: qrCodeString });
+    } else if (authenticated) {
+        res.json({ status: 'authenticated' });
     } else {
-        res.status(404).json({ message: 'No hay QR disponible aún' });
+        res.json({ status: 'pending' });
     }
 });
 
-// Ruta para saber si el bot está autenticado (GET /status)
+// Ruta para ver si está autenticado
 app.get('/status', (req, res) => {
-    res.json({ ready: isReady });
+    res.json({ authenticated });
 });
 
-// Ruta para traer todos los chats activos (GET /chats)
-app.get('/chats', async (req, res) => {
-    if (!isReady) return res.status(401).json({ error: 'Bot no autenticado' });
-    const chats = await client.getChats();
-    // Podés filtrar info si no querés enviar TODO
-    res.json(chats.map(chat => ({
-        id: chat.id._serialized,
-        name: chat.name || chat.formattedTitle || chat.id.user,
-        isGroup: chat.isGroup,
-        unreadCount: chat.unreadCount
-    })));
-});
-
-// Ruta para traer mensajes de un chat (GET /messages/:chatId)
-app.get('/messages/:chatId', async (req, res) => {
-    if (!isReady) return res.status(401).json({ error: 'Bot no autenticado' });
-    const chat = await client.getChatById(req.params.chatId);
-    const messages = await chat.fetchMessages({ limit: 50 }); // Trae los últimos 50
-    res.json(messages.map(m => ({
-        from: m.from,
-        to: m.to,
-        body: m.body,
-        timestamp: m.timestamp
-    })));
-});
-
-app.listen(PORT,'0.0.0.0', () => {
-    console.log(`Bot escuchando en http://localhost:${PORT}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Servidor Express escuchando en http://0.0.0.0:${port}`);
 });

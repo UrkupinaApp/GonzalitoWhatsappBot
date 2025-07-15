@@ -41,7 +41,7 @@ client.initialize();
 app.get('/qr', async (req, res) => {
     if (qrCodeString && !authenticated) {
         const qrImage = await qrcode.toDataURL(qrCodeString);
-        res.json({ qr: qrImage, raw: qrCodeString });
+        res.json({ qr: qrImage, raw: qrCodeString,msg:"Mensaje desde el back" });
     } else if (authenticated) {
         res.json({ status: 'authenticated' });
     } else {

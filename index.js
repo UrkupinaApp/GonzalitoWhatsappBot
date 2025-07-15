@@ -7,7 +7,11 @@ const port = 4000;
 let qrCodeString = null;
 let authenticated = false;
 
-const client = new Client();
+const client = new Client({
+    puppeteer: {
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
+});
 
 client.on('qr', (qr) => {
     qrCodeString = qr;

@@ -1,0 +1,13 @@
+[
+    {
+      "template": "fallback",
+      "from": "09:00",
+      "to":   "18:00"
+    },
+    {
+      "template": "after_hours",
+      "from": "18:00",
+      "to":   "09:00"
+    }
+  ]
+  

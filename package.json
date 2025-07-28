@@ -13,10 +13,13 @@
     "@adiwajshing/baileys": "^5.0.0",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.7.18",
+    "cors": "^2.8.5",
     "curve25519-js": "^0.0.4",
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.31.0"
+    "whatsapp-web.js": "^1.31.0",
+    "xlsx": "^0.18.5"
   }
 }

@@ -1,17 +1,18 @@
 const express        = require('express');
+const cors           = require('cors');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs             = require('fs');
 const path           = require('path');
-const qrcodeTerminal = require('qrcode-terminal');
 const QRCode         = require('qrcode');
 const xlsx           = require('xlsx');
-const cors = require('cors')
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
-app.use(cors())
 
-// --- Configuración de archivos y DB ---
+// --- Habilitar CORS para el frontend ---
+app.use(cors());
+
+// --- Rutas y configuración ---
 const authDir         = path.join(__dirname, '.wwebjs_auth');
 const sessionDir      = path.join(authDir, 'session', 'Default');
 const CSV_PATH        = path.join(__dirname, 'stand_base_datos.csv');
@@ -21,13 +22,13 @@ const FORMATS_VALIDOS = [
   'image/gif','image/heic','image/heif'
 ];
 
-// Carga inicial de la base de datos CSV
+// --- Cargar base de datos CSV ---
 let dbRecords = [];
 try {
   const wb   = xlsx.readFile(CSV_PATH);
   const rows = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
   dbRecords   = rows.map(r => ({
-    fila:   parseInt(r.fila, 10),
+    fila:   parseInt(r.fila,   10),
     puesto: parseInt(r.puesto, 10)
   }));
   console.log(`✅ DB cargada: ${dbRecords.length} registros`);
@@ -35,23 +36,38 @@ try {
   console.error('❌ No se pudo leer base de datos:', e);
 }
 
-// Estado global de autenticación
+// --- Estado global de WhatsApp ---
 let client;
 let isReady = false;
 let lastQR  = null;
 
-// Función para (re)crear el cliente de WhatsApp
+// --- Función para (re)inicializar el cliente WhatsApp ---
 function initWhatsappClient() {
+  // Si ya existía, destruye y resetea estados
   if (client) {
     client.destroy();
     isReady = false;
     lastQR  = null;
   }
-  client = new Client({ authStrategy: new LocalAuth() });
+
+  // Crear nuevo cliente con flags de Puppeteer para evitar sandbox
+  client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-zygote',
+        '--single-process'
+      ]
+    }
+  });
 
   client.on('qr', qr => {
     lastQR = qr;
-    qrcodeTerminal.generate(qr, { small: true });
     console.log('🔑 QR generado, pendiente de escaneo');
   });
 
@@ -63,7 +79,7 @@ function initWhatsappClient() {
 
   client.on('auth_failure', () => {
     isReady = false;
-    console.warn('❌ Falló autenticación, generando nuevo QR');
+    console.warn('❌ Falló autenticación, solicitando nuevo QR');
   });
 
   client.on('disconnected', () => {
@@ -75,55 +91,18 @@ function initWhatsappClient() {
   client.initialize();
 }
 
-// Inicializa por primera vez
+// Inicializamos el cliente por primera vez
 initWhatsappClient();
 
-// --- Endpoint: mostrar estado y/o QR en HTML ---
-/* app.get('/qr', async (req, res) => {
-  res.set('Content-Type', 'text/html');
-  if (isReady) {
-    return res.send(`
-      <div>
-        <h1>Bot autenticado ✔️</h1>
-        <p>Puedes usar el servicio por WhatsApp.</p>
-        <p><a href="/logout">Desconectar sesión</a></p>
-        <div/>
-    `);
-  }
-  if (lastQR) {
-    try {
-      const qrDataUrl = await QRCode.toDataURL(lastQR);
-      return res.send(`
-        <html><body style="font-family:sans-serif;text-align:center;padding:2rem;">
-          <h1>Escanea este QR con WhatsApp</h1>
-          <img src="${qrDataUrl}" alt="QR Code" />
-          <p>Una vez escaneado, recarga esta página.</p>
-        </body></html>
-      `);
-    } catch (err) {
-      console.error('❌ Error generando data URL del QR:', err);
-      return res.status(500).send('<p>Error generando QR.</p>');
-    }
-  }
-  return res.send(`
-    <html><body style="font-family:sans-serif;text-align:center;padding:2rem;">
-      <h1>Generando QR…</h1>
-      <p>Inténtalo de nuevo en unos segundos.</p>
-    </body></html>
-  `);
-});
- */
-
+// --- Endpoint JSON para estado / QR ---
 app.get('/qr', async (req, res) => {
-  // Siempre devolvemos JSON
   res.type('application/json');
-  
+
   if (isReady) {
     return res.json({ authenticated: true });
   }
-  
+
   if (lastQR) {
-    // Opcionalmente, puedes preconvertirlo a DataURL en el backend:
     try {
       const dataUrl = await QRCode.toDataURL(lastQR);
       return res.json({
@@ -131,28 +110,27 @@ app.get('/qr', async (req, res) => {
         qr: dataUrl
       });
     } catch (err) {
-      console.error('Error generando DataURL del QR:', err);
+      console.error('❌ Error generando DataURL del QR:', err);
       return res.status(500).json({ error: 'Error generando QR' });
     }
   }
 
-  // Aún no hay QR disponible
+  // QR aún no generado
   return res.status(503).json({
     authenticated: false,
     qr: null,
-    message: 'QR aún no generado, inténtalo en un momento'
+    message: 'QR aún no disponible, inténtalo en breve'
   });
 });
 
-
-// --- Endpoint: logout y regenerar sesión ---
+// --- Endpoint para logout y regenerar QR ---
 app.get('/logout', async (req, res) => {
   try {
     await client.logout();
     initWhatsappClient();
     return res.json({
       success: true,
-      message: 'Sesión desconectada. Se está generando un nuevo QR.'
+      message: 'Sesión desconectada. Generando nuevo QR...'
     });
   } catch (e) {
     console.error('❌ Error al desconectar:', e);
@@ -160,7 +138,7 @@ app.get('/logout', async (req, res) => {
   }
 });
 
-// --- Lógica de conversación completa ---
+// --- Lógica de conversación ---
 let userData = {};
 
 client.on('message', async msg => {
@@ -169,7 +147,7 @@ client.on('message', async msg => {
   if (!userData[chatId]) userData[chatId] = { step: 'inicio' };
   const u = userData[chatId];
 
-  // Comando global para terminar
+  // Comando global para finalizar
   if (texto?.toLowerCase() === 'salir') {
     delete userData[chatId];
     return msg.reply('✅ Gestión finalizada. ¡Hasta luego!');
@@ -271,7 +249,7 @@ client.on('message', async msg => {
     if (!FORMATS_VALIDOS.includes(media.mimetype)) {
       return msg.reply('⚠️ Solo acepto PDF o imágenes.');
     }
-    // Guardar archivo
+    // Guardar archivo local
     const ext      = media.mimetype.split('/')[1];
     const filename = `comprobante_${chatId}_${Date.now()}.${ext}`;
     const dir      = path.join(__dirname, 'comprobantes');
@@ -318,14 +296,11 @@ client.on('message', async msg => {
     return msg.reply('Por favor responde *sí* o *no*.');
   }
 
-  // Fallback
-  if (u.step === 'inicio') {
-    return msg.reply('📌 Para comenzar escribe *hola*.');
-  }
+  // Fallback general
   return msg.reply('🤖 No entendí tu mensaje. Escribe *hola* o *salir* para reiniciar.');
 });
 
 // --- Arrancar servidor HTTP ---
 app.listen(PORT, () => {
-  console.log(`🚀 API escuchando en http://localhost:${PORT}`);
+  console.log(`🚀 API escuchando en http://localhost:${PORT}`);  
 });
